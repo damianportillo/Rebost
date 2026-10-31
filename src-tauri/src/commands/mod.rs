@@ -1,6 +1,7 @@
 //! Tauri commands: thin adapters between the webview and the core.
 //! Heavy work stays in core modules; errors become friendly strings here.
 
+mod api;
 mod chat;
 mod images;
 mod model;
@@ -8,6 +9,7 @@ mod recipes;
 mod settings;
 mod shelves;
 
+pub use api::*;
 pub use chat::*;
 pub use images::*;
 pub use model::*;
