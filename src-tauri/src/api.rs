@@ -109,17 +109,20 @@ impl ApiService {
     }
 
     pub fn status(&self) -> ApiStatus {
-        let settings = crate::core::read_lock(&self.ctx.settings);
+        let (configured_port, bind_lan, key_configured) = {
+            let settings = crate::core::read_lock(&self.ctx.settings);
+            (settings.api_port.unwrap_or(DEFAULT_PORT), settings.api_bind_lan, settings.api_key_hash.is_some())
+        };
         let runtime = self.runtime.lock().unwrap_or_else(|p| p.into_inner());
         let running = runtime.task.as_ref().is_some_and(|task| !task.is_finished());
         let bind = if running {
             runtime.bind.clone()
-        } else if settings.api_bind_lan {
+        } else if bind_lan {
             "0.0.0.0".into()
         } else {
             "127.0.0.1".into()
         };
-        let port = if running { runtime.port } else { settings.api_port };
+        let port = if running { runtime.port } else { configured_port };
         ApiStatus {
             running,
             bind: bind.clone(),
@@ -129,7 +132,7 @@ impl ApiService {
                 if bind == "0.0.0.0" { "<IP-DE-TU-PC>" } else { &bind },
                 port
             ),
-            key_configured: settings.api_key_hash.is_some(),
+            key_configured,
         }
     }
 
@@ -147,7 +150,7 @@ impl ApiService {
             "stop the API before changing its network settings"
         );
         self.ctx.update_settings(|settings| {
-            settings.api_port = port;
+            settings.api_port = Some(port);
             settings.api_bind_lan = bind_lan;
         })
     }
@@ -156,6 +159,7 @@ impl ApiService {
         {
             let runtime = self.runtime.lock().unwrap_or_else(|p| p.into_inner());
             if runtime.task.as_ref().is_some_and(|task| !task.is_finished()) {
+                drop(runtime);
                 return Ok(self.status());
             }
         }
@@ -166,7 +170,7 @@ impl ApiService {
         } else {
             IpAddr::V4(Ipv4Addr::LOCALHOST)
         };
-        let address = SocketAddr::new(ip, settings.api_port);
+        let address = SocketAddr::new(ip, settings.api_port.unwrap_or(DEFAULT_PORT));
         let listener = TcpListener::bind(address).await?;
         let actual_port = listener.local_addr()?.port();
         let state = ApiState {
@@ -307,84 +311,87 @@ async fn chat_completions(
             return error(StatusCode::NOT_FOUND, "The requested model is not available.", Some("model_not_found"));
         }
     }
-
-    let _generation = state.chat.acquire_generation().await;
     let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let completion_id = format!("chatcmpl-{}", Uuid::new_v4().simple());
     let created = chrono::Utc::now().timestamp();
+
     if request.stream.unwrap_or(false) {
         let (sender, receiver) = tokio::sync::mpsc::unbounded_channel::<String>();
+        let task_state = state.clone();
         let model = active_model.clone();
         let id = completion_id.clone();
-        let result = state.engine.complete(
-            &messages,
-            ChatOptions::stream(temperature, max_tokens),
-            &cancel,
-            |event| {
-                let delta = match event {
-                    StreamEvent::Answer(content) => json!({"content": content}),
-                    StreamEvent::Thinking(_) | StreamEvent::ResetAnswer | StreamEvent::PromoteAnswerToThinking => return,
-                };
-                let chunk = json!({
-                    "id": id,
-                    "object": "chat.completion.chunk",
-                    "created": created,
-                    "model": model,
-                    "choices": [{"index": 0, "delta": delta, "finish_reason": null}]
-                });
-                let _ = sender.send(format!("data: {chunk}\n\n"));
-            },
-        ).await;
-        match result {
-            Ok(output) => {
-                let finish = output.finish_reason.as_deref().unwrap_or("stop");
-                let _ = sender.send(format!("data: {}\n\n", json!({
-                    "id": completion_id,
-                    "object": "chat.completion.chunk",
-                    "created": created,
-                    "model": active_model,
-                    "choices": [{"index": 0, "delta": {}, "finish_reason": finish}]
-                })));
-                let _ = sender.send("data: [DONE]\n\n".into());
+        tokio::spawn(async move {
+            let _generation = task_state.chat.acquire_generation().await;
+            let event_sender = sender.clone();
+            let result = task_state.engine.complete(
+                &messages,
+                ChatOptions::stream(temperature, max_tokens),
+                &cancel,
+                move |event| {
+                    let delta = match event {
+                        StreamEvent::Answer(content) => json!({"content": content}),
+                        StreamEvent::Thinking(_) | StreamEvent::ResetAnswer | StreamEvent::PromoteAnswerToThinking => return,
+                    };
+                    let chunk = json!({
+                        "id": id,
+                        "object": "chat.completion.chunk",
+                        "created": created,
+                        "model": model,
+                        "choices": [{"index": 0, "delta": delta, "finish_reason": null}]
+                    });
+                    let _ = event_sender.send(format!("data: {chunk}\\n\\n"));
+                },
+            ).await;
+            match result {
+                Ok(output) => {
+                    let finish = output.finish_reason.as_deref().unwrap_or("stop");
+                    let _ = sender.send(format!("data: {}\\n\\n", json!({
+                        "id": completion_id,
+                        "object": "chat.completion.chunk",
+                        "created": created,
+                        "model": active_model,
+                        "choices": [{"index": 0, "delta": {}, "finish_reason": finish}]
+                    })));
+                    let _ = sender.send("data: [DONE]\\n\\n".into());
+                }
+                Err(_) => {
+                    let _ = sender.send(format!("data: {}\\n\\n", json!({
+                        "error": {"message": "Local model generation failed.", "type": "server_error"}
+                    })));
+                    let _ = sender.send("data: [DONE]\\n\\n".into());
+                }
             }
-            Err(_) => {
-                let _ = sender.send(format!("data: {}\n\n", json!({
-                    "error": {"message": "Local model generation failed.", "type": "server_error"}
-                })));
-                let _ = sender.send("data: [DONE]\n\n".into());
-            }
-        }
-        drop(sender);
+        });
         let body_stream = stream::unfold(receiver, |mut rx| async {
             rx.recv().await.map(|chunk| (Ok::<Bytes, std::io::Error>(Bytes::from(chunk)), rx))
         });
-        Response::builder()
+        return Response::builder()
             .status(StatusCode::OK)
             .header(header::CONTENT_TYPE, "text/event-stream")
             .header(header::CACHE_CONTROL, "no-cache")
             .header(header::CONNECTION, "keep-alive")
             .body(Body::from_stream(body_stream))
-            .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
-    } else {
-        match state.engine.complete(
-            &messages,
-            ChatOptions::once(temperature, max_tokens),
-            &cancel,
-            |_| {},
-        ).await {
-            Ok(output) => Json(json!({
-                "id": completion_id,
-                "object": "chat.completion",
-                "created": created,
-                "model": active_model,
-                "choices": [{
-                    "index": 0,
-                    "message": {"role": "assistant", "content": output.answer},
-                    "finish_reason": output.finish_reason.as_deref().unwrap_or("stop")
-                }],
-                "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
-            })).into_response(),
-            Err(_) => error(StatusCode::INTERNAL_SERVER_ERROR, "Local model generation failed.", Some("server_error")),
-        }
+            .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response());
+    }
+
+    let _generation = state.chat.acquire_generation().await;
+    match state.engine.complete(
+        &messages,
+        ChatOptions::once(temperature, max_tokens),
+        &cancel,
+        |_| {},
+    ).await {
+        Ok(output) => Json(json!({
+            "id": completion_id,
+            "object": "chat.completion",
+            "created": created,
+            "model": active_model,
+            "choices": [{
+                "index": 0,
+                "message": {"role": "assistant", "content": output.answer},
+                "finish_reason": output.finish_reason.as_deref().unwrap_or("stop")
+            }]
+        })).into_response(),
+        Err(_) => error(StatusCode::INTERNAL_SERVER_ERROR, "Local model generation failed.", Some("server_error")),
     }
 }
