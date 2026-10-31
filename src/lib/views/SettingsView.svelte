@@ -279,6 +279,20 @@
     }
   }
 
+  async function revokeApiKey() {
+    if (apiBusy) return;
+    apiBusy = true;
+    apiError = "";
+    try {
+      localApiStatus = await api.apiKeyRevoke();
+      apiKey = "";
+    } catch (error) {
+      apiError = userFacingError(error);
+    } finally {
+      apiBusy = false;
+    }
+  }
+
   async function startLocalApi() {
     if (apiBusy) return;
     apiBusy = true;
@@ -640,6 +654,11 @@
       <button type="button" class="btn-outline" onclick={generateApiKey} disabled={apiBusy}>
         Generar / rotar API key
       </button>
+      {#if localApiStatus?.keyConfigured}
+        <button type="button" class="btn-outline" onclick={revokeApiKey} disabled={apiBusy}>
+          Revocar API key
+        </button>
+      {/if}
       {#if localApiStatus?.running}
         <button type="button" class="btn-primary" onclick={stopLocalApi} disabled={apiBusy}>Detener API</button>
       {:else}
