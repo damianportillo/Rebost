@@ -338,6 +338,7 @@ pub fn run() {
             commands::api_status,
             commands::api_configure,
             commands::api_key_generate,
+            commands::api_key_revoke,
             commands::api_start,
             commands::api_stop,
             commands::settings_set_house_rules,
