@@ -23,6 +23,12 @@ pub fn api_key_generate(api: State<'_, Arc<ApiService>>) -> CmdResult<String> {
 }
 
 #[tauri::command]
+pub fn api_key_revoke(api: State<'_, Arc<ApiService>>) -> CmdResult<ApiStatus> {
+    api.revoke_key().map_err(|error| error.to_string())?;
+    Ok(api.status())
+}
+
+#[tauri::command]
 pub async fn api_start(api: State<'_, Arc<ApiService>>) -> CmdResult<ApiStatus> {
     api.start().await.map_err(|error| error.to_string())
 }
