@@ -649,6 +649,7 @@ export const api = {
   apiConfigure: (port: number, bindLan: boolean) =>
     invoke<LocalApiStatus>("api_configure", { port, bindLan }),
   apiKeyGenerate: () => invoke<string>("api_key_generate"),
+  apiKeyRevoke: () => invoke<LocalApiStatus>("api_key_revoke"),
   apiStart: () => invoke<LocalApiStatus>("api_start"),
   apiStop: () => invoke<LocalApiStatus>("api_stop"),
   setHouseRules: (text: string) => invoke<void>("settings_set_house_rules", { text }),
