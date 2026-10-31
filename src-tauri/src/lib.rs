@@ -7,6 +7,7 @@
 //! See `docs/architecture.md` in the repository root.
 
 pub mod about;
+pub mod api;
 pub mod chat;
 pub mod commands;
 #[cfg(unix)]
@@ -39,6 +40,7 @@ rust_i18n::i18n!("../locales", fallback = "en");
 use std::sync::{Arc, Mutex};
 use tauri::Manager;
 
+use crate::api::ApiService;
 use crate::chat::ChatService;
 use crate::core::{Ctx, Events};
 use crate::engine::{Engine, EngineState};
@@ -217,6 +219,7 @@ pub fn run() {
                 log::warn!("cleaning abandoned image drafts: {error}");
             }
             let chat = ChatService::new(ctx.clone(), engine.clone());
+            let api = ApiService::new(ctx.clone(), engine.clone(), chat.clone());
 
             // Core workers live on the tokio runtime tauri drives.
             let runtime_guard = tauri::async_runtime::handle().inner().clone();
@@ -254,6 +257,7 @@ pub fn run() {
             app.manage(ctx);
             app.manage(engine);
             app.manage(chat);
+            app.manage(api);
             app.manage(ingestor);
             app.manage(watcher);
 
@@ -331,6 +335,11 @@ pub fn run() {
             commands::download_cancel,
             commands::download_skip_verify,
             commands::settings_get,
+            commands::api_status,
+            commands::api_configure,
+            commands::api_key_generate,
+            commands::api_start,
+            commands::api_stop,
             commands::settings_set_house_rules,
             commands::settings_set_allow_online_research,
             commands::settings_set_text_size,
@@ -371,6 +380,10 @@ pub fn run() {
                 }
             }
             tauri::RunEvent::Exit => {
+                // Stop the optional HTTP listener before releasing the local engine.
+                if let Some(api) = app.try_state::<Arc<ApiService>>() {
+                    api.stop_blocking();
+                }
                 // Closing Rebost stops the engine and releases its memory.
                 if let Some(engine) = app.try_state::<Arc<Engine>>() {
                     engine.stop_blocking();
