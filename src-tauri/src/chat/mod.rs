@@ -72,6 +72,11 @@ impl ChatService {
         })
     }
 
+    /// Acquire the shared generation slot for non-UI inference callers.
+    pub(crate) async fn acquire_generation(&self) -> tokio::sync::MutexGuard<'_, ()> {
+        self.generation.lock().await
+    }
+
     pub fn cancel(&self, message_id: &str) {
         if let Some(flag) = crate::core::mutex_lock(&self.cancels).get(message_id) {
             flag.store(true, Ordering::Relaxed);
