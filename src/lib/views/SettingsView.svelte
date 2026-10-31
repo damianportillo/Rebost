@@ -254,6 +254,10 @@
 
   async function saveApiNetwork() {
     if (apiBusy) return;
+    if (!Number.isInteger(apiPort) || apiPort < 1 || apiPort > 65535) {
+      apiError = "Ingresá un puerto válido entre 1 y 65535.";
+      return;
+    }
     apiBusy = true;
     apiError = "";
     try {
