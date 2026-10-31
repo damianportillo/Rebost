@@ -233,6 +233,14 @@ export type AppLocale =
   | "fi";
 export type LocalePref = "system" | AppLocale;
 
+export interface LocalApiStatus {
+  running: boolean;
+  bind: string;
+  port: number;
+  baseUrl: string;
+  keyConfigured: boolean;
+}
+
 export interface SettingsView {
   houseRules: string;
   onboardingDone: boolean;
@@ -637,6 +645,12 @@ export const api = {
   downloadSkipVerify: (id: string) => invoke<void>("download_skip_verify", { id }),
 
   settingsGet: () => invoke<SettingsView>("settings_get"),
+  apiStatus: () => invoke<LocalApiStatus>("api_status"),
+  apiConfigure: (port: number, bindLan: boolean) =>
+    invoke<LocalApiStatus>("api_configure", { port, bindLan }),
+  apiKeyGenerate: () => invoke<string>("api_key_generate"),
+  apiStart: () => invoke<LocalApiStatus>("api_start"),
+  apiStop: () => invoke<LocalApiStatus>("api_stop"),
   setHouseRules: (text: string) => invoke<void>("settings_set_house_rules", { text }),
   setAllowOnlineResearch: (enabled: boolean) =>
     invoke<void>("settings_set_allow_online_research", { enabled }),
