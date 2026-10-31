@@ -5,6 +5,7 @@
     formatBytes,
     runsEmulatedOnArm,
     type Diagnostics,
+    type LocalApiStatus,
     type MachineView,
     type ModelSearchResult,
     type Recommendation,
@@ -82,6 +83,12 @@
   let rulesError = $state("");
   let rulesSaving = $state(false);
   let onlineResearch = $state(app.settings?.allowOnlineResearch ?? false);
+  let localApiStatus = $state<LocalApiStatus | null>(null);
+  let apiPort = $state(43210);
+  let apiLan = $state(false);
+  let apiKey = $state("");
+  let apiBusy = $state(false);
+  let apiError = $state("");
   let textSize = $state<TextSize>(parseTextSize(app.settings?.textSize));
   let uiLocale = $state<LocalePref>(parseLocalePref(app.settings?.uiLocale));
   const mac = isMac();
@@ -145,6 +152,14 @@
     onlineResearch = app.settings?.allowOnlineResearch ?? false;
     textSize = parseTextSize(app.settings?.textSize);
     uiLocale = parseLocalePref(app.settings?.uiLocale);
+  });
+
+  $effect(() => {
+    void api.apiStatus().then((status) => {
+      localApiStatus = status;
+      apiPort = status.port;
+      apiLan = status.bind === "0.0.0.0";
+    }).catch((error) => logInvokeError(error, "local API status"));
   });
 
   $effect(() => {
@@ -234,6 +249,59 @@
     } catch (error) {
       onlineResearch = app.settings?.allowOnlineResearch ?? false;
       notifyInvokeError(error);
+    }
+  }
+
+  async function saveApiNetwork() {
+    if (apiBusy) return;
+    apiBusy = true;
+    apiError = "";
+    try {
+      localApiStatus = await api.apiConfigure(apiPort, apiLan);
+    } catch (error) {
+      apiError = userFacingError(error);
+    } finally {
+      apiBusy = false;
+    }
+  }
+
+  async function generateApiKey() {
+    if (apiBusy) return;
+    apiBusy = true;
+    apiError = "";
+    try {
+      apiKey = await api.apiKeyGenerate();
+      localApiStatus = await api.apiStatus();
+    } catch (error) {
+      apiError = userFacingError(error);
+    } finally {
+      apiBusy = false;
+    }
+  }
+
+  async function startLocalApi() {
+    if (apiBusy) return;
+    apiBusy = true;
+    apiError = "";
+    try {
+      localApiStatus = await api.apiStart();
+    } catch (error) {
+      apiError = userFacingError(error);
+    } finally {
+      apiBusy = false;
+    }
+  }
+
+  async function stopLocalApi() {
+    if (apiBusy) return;
+    apiBusy = true;
+    apiError = "";
+    try {
+      localApiStatus = await api.apiStop();
+    } catch (error) {
+      apiError = userFacingError(error);
+    } finally {
+      apiBusy = false;
     }
   }
 
@@ -529,6 +597,75 @@
       />
     {/if}
   {/snippet}
+
+  <section class="card mb-6 px-4 py-5 min-[900px]:px-6">
+    <div class="mb-4 flex flex-wrap items-start justify-between gap-3">
+      <div class="min-w-0 flex-1">
+        <h2 class="text-[15px] font-semibold text-ink">API local compatible con OpenAI</h2>
+        <p class="mt-1 text-[12.5px] leading-snug text-ink-soft">
+          Permite conectar clientes externos al modelo local. La API permanece detenida hasta iniciarla manualmente.
+        </p>
+      </div>
+      <span class="rounded-full border border-paper-line px-2.5 py-1 text-[11px] text-ink-soft">
+        {localApiStatus?.running ? "En ejecución" : "Detenida"}
+      </span>
+    </div>
+    <div class="grid gap-3 sm:grid-cols-[10rem_1fr]">
+      <label class="text-[12px] font-medium text-ink-soft" for="local-api-port">
+        Puerto
+        <input
+          id="local-api-port"
+          type="number"
+          min="1"
+          max="65535"
+          class="input mt-1 w-full"
+          bind:value={apiPort}
+          disabled={apiBusy || !!localApiStatus?.running}
+        />
+      </label>
+      <label class="flex cursor-default items-center gap-2 self-end pb-2 text-[12.5px] text-ink-soft">
+        <input
+          type="checkbox"
+          class="size-4 accent-navy-700"
+          bind:checked={apiLan}
+          disabled={apiBusy || !!localApiStatus?.running}
+        />
+        Permitir conexiones desde la red local (LAN)
+      </label>
+    </div>
+    <div class="mt-3 flex flex-wrap gap-2">
+      <button type="button" class="btn-outline" onclick={saveApiNetwork} disabled={apiBusy || !!localApiStatus?.running}>
+        Guardar red
+      </button>
+      <button type="button" class="btn-outline" onclick={generateApiKey} disabled={apiBusy}>
+        Generar / rotar API key
+      </button>
+      {#if localApiStatus?.running}
+        <button type="button" class="btn-primary" onclick={stopLocalApi} disabled={apiBusy}>Detener API</button>
+      {:else}
+        <button type="button" class="btn-primary" onclick={startLocalApi} disabled={apiBusy || !localApiStatus?.keyConfigured}>Iniciar API</button>
+      {/if}
+    </div>
+    {#if localApiStatus}
+      <p class="mt-3 break-all font-mono text-[11.5px] text-ink-soft">
+        Base URL: {localApiStatus.baseUrl}
+      </p>
+      <p class="mt-1 text-[11.5px] text-ink-faint">
+        Autenticación Bearer: {localApiStatus.keyConfigured ? "configurada" : "falta generar una clave"}.
+        Endpoint: /v1/chat/completions
+      </p>
+    {/if}
+    {#if apiKey}
+      <div class="mt-3 rounded-lg border border-paper-line bg-paper-soft p-3">
+        <p class="mb-1 text-[12px] font-semibold text-ink">Clave generada — copiala ahora</p>
+        <code class="block select-text break-all text-[12px] text-ink">{apiKey}</code>
+        <p class="mt-1 text-[11px] text-ink-faint">Por seguridad, Rebost guarda únicamente su hash y no volverá a mostrar esta clave.</p>
+      </div>
+    {/if}
+    {#if apiError}
+      <p role="alert" class="mt-3 text-sm text-red-700 dark:text-red-400">{apiError}</p>
+    {/if}
+  </section>
 
   <section class="card mb-6 px-4 py-5 min-[900px]:px-6">
     <div class="flex flex-wrap items-center gap-4">
