@@ -138,7 +138,10 @@ impl ApiService {
     pub fn configure(&self, port: u16, bind_lan: bool) -> anyhow::Result<()> {
         anyhow::ensure!(port != 0, "port must be between 1 and 65535");
         let runtime = self.runtime.lock().unwrap_or_else(|p| p.into_inner());
-        anyhow::ensure!(runtime.task.is_none(), "stop the API before changing its network settings");
+        anyhow::ensure!(
+            runtime.task.as_ref().is_none_or(|task| task.is_finished()),
+            "stop the API before changing its network settings"
+        );
         drop(runtime);
         self.ctx.update_settings(|settings| {
             settings.api_port = Some(port);
