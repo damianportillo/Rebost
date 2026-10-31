@@ -339,26 +339,26 @@ async fn chat_completions(
                         "model": model,
                         "choices": [{"index": 0, "delta": delta, "finish_reason": null}]
                     });
-                    let _ = event_sender.send(format!("data: {chunk}\\n\\n"));
+                    let _ = event_sender.send(format!("data: {chunk}\n\n"));
                 },
             ).await;
             match result {
                 Ok(output) => {
                     let finish = output.finish_reason.as_deref().unwrap_or("stop");
-                    let _ = sender.send(format!("data: {}\\n\\n", json!({
+                    let _ = sender.send(format!("data: {}\n\n", json!({
                         "id": completion_id,
                         "object": "chat.completion.chunk",
                         "created": created,
                         "model": active_model,
                         "choices": [{"index": 0, "delta": {}, "finish_reason": finish}]
                     })));
-                    let _ = sender.send("data: [DONE]\\n\\n".into());
+                    let _ = sender.send("data: [DONE]\n\n".into());
                 }
                 Err(_) => {
-                    let _ = sender.send(format!("data: {}\\n\\n", json!({
+                    let _ = sender.send(format!("data: {}\n\n", json!({
                         "error": {"message": "Local model generation failed.", "type": "server_error"}
                     })));
-                    let _ = sender.send("data: [DONE]\\n\\n".into());
+                    let _ = sender.send("data: [DONE]\n\n".into());
                 }
             }
         });
