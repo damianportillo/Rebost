@@ -116,7 +116,7 @@ impl ApiService {
             port,
             base_url: format!(
                 "http://{}:{}",
-                if bind == "0.0.0.0" { "<IP-DE-TU-PC>" } else { &bind },
+                if bind == "0.0.0.0" { "<IP-DE-TU-PC>" } else { bind.as_str() },
                 port
             ),
             key_configured,
