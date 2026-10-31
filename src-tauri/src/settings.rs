@@ -68,6 +68,14 @@ pub struct Settings {
     /// Folder the person chose for AI models. `None` is `<app-data>/models`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub models_folder: Option<PathBuf>,
+    /// SHA-256 hash of the high-entropy API bearer token; the token itself is never stored.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub api_key_hash: Option<String>,
+    /// Optional OpenAI-compatible API listener port (defaults to 43210).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub api_port: Option<u16>,
+    /// Expose the API on the LAN instead of loopback only.
+    pub api_bind_lan: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
